@@ -1,0 +1,6 @@
+pipenv
+gunicorn
+flask
+rapidfuzz
+polars
+gevent
