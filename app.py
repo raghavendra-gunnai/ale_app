@@ -70,6 +70,7 @@ def api_get_similar_account_pairs():
         raise json.decoder.JSONDecodeError("Unable to parse request, error: {}".format(e))
     except Exception as e:
         raise ValueError("Unknown, error: {}".format(e))
+    # Failsafe, if any of the expected keys not found
     if not all(k in req.keys() for k in ['accounts', 'posts', 'hashtag']):
         return jsonify({'error': 'not all keys found, pls check input'})
     accounts = req['accounts']
