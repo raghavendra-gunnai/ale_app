@@ -1,21 +1,27 @@
-import ast
 import logging
+import json
+import time
 from flask import Flask, request, jsonify
 from itertools import combinations
 from rapidfuzz.distance.DamerauLevenshtein import normalized_similarity
 from gevent import monkey
-monkey.patch_all()
+# monkey.patch_all()
 
 app = Flask(__name__)
 health_status = True
+logging.basicConfig(format='%(asctime)s %(levelname)-8s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
 
 
 def get_similar_account_pairs(posts, accounts, hashtag, min_similarity):
     # Filter posts by hashtag and exclude reposts
     account_ids = set()
+    # Converting hashtags to lower case
+    posts = [{k: (v.lower() if k == 'hashtags' else v) for k, v in posts_dict.items()} for posts_dict in posts]
     for post in posts:
-        print(post)
-        if not post['is_repost'] and post['hashtags'] and hashtag in post['hashtags']:
+        if all(k in post for k in ['hashtags', 'is_repost']) and not json.loads(post['is_repost'].lower()) and \
+                hashtag.lower() in post['hashtags']:
             account_ids.add(post['author_id'])
 
     # Extract screen names from accounts
@@ -26,15 +32,15 @@ def get_similar_account_pairs(posts, accounts, hashtag, min_similarity):
     for account_1, account_2 in combinations(hashtag_accts, 2):
         screen_name1 = account_1['screen_name']
         screen_name2 = account_2['screen_name']
-        similarity = normalized_similarity(screen_name1, screen_name2)
+        similarity = normalized_similarity(screen_name1.lower(), screen_name2.lower())
         if similarity > min_similarity:
-            similar_account_pairs.append((account_1['id'], account_2['id']))
+            similar_account_pairs.append((account_1['id'], account_2['id'], similarity))
 
     return similar_account_pairs
 
 
 # New route for health check
-@app.route('/health')
+@app.route('/health', methods=['GET'])
 def health():
     if health_status:
         resp = jsonify(health="healthy")
@@ -57,31 +63,30 @@ def toggle():
 @app.route('/get_similar_account_pairs', methods=['GET'])
 def api_get_similar_account_pairs():
     # Get parameters from request
-    posts = ast.literal_eval(request.args.get('posts'))
-    accounts = ast.literal_eval(request.args.get('accounts'))
-    hashtag = request.args.get('hashtag')
-    min_similarity_str = request.args.get('min_similarity')
-    if min_similarity_str is None:
-        min_similarity = 0.8  # Default value
+    st = time.time()
+    try:
+        req = json.loads(request.data)
+    except json.decoder.JSONDecodeError as e:
+        raise json.decoder.JSONDecodeError("Unable to parse request, error: {}".format(e))
+    except Exception as e:
+        raise ValueError("Unknown, error: {}".format(e))
+    if not all(k in req.keys() for k in ['accounts', 'posts', 'hashtag']):
+        return jsonify({'error': 'not all keys found, pls check input'})
+    accounts = req['accounts']
+    posts = req['posts']
+    hashtag = req['hashtag']
+    if 'min_similarity' in req.keys():
+        min_similarity = req['min_similarity']
     else:
-        min_similarity = float(ast.literal_eval(min_similarity_str))
+        min_similarity = 0.8
+
     # Call the function to get similar account pairs
     similar_account_pairs = get_similar_account_pairs(posts, accounts, hashtag, min_similarity)
-
+    logger.info("Time taken to process the request is: {}".format(str(time.time()-st)))
     # Return the result as JSON
     return jsonify(similar_account_pairs)
 
 
-def set_logger(logger_nm: str):
-    logger_obj = logging.getLogger(logger_nm)
-    logger_obj.setLevel(logging.DEBUG)
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    stream_handler = logging.StreamHandler()
-    stream_handler.setFormatter(formatter)
-    logger_obj.addHandler(stream_handler)
-    return logger
-
-
 if __name__ == '__main__':
-    logger = set_logger(__name__)
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5001, debug=False)
+    # app.run(debug=True)
